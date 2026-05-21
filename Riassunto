@@ -14,16 +14,30 @@
             ft.Container(self._btnAnalizzaAeroporti, width=250),
         ], alignment=ft.MainAxisAlignment.CENTER)
     - Aggiungere DropDown: self._ddAeroportoA = ft.Dropdown(label="Aeroporto di Destinazione")
+    NB va fatto nel controller
+        def _fillDropdown(self, allNodes):
+        for n in allNodes:
+            self._view._ddAeroportoP.options.append(
+                ft.dropdown.Option(
+                    data = n,
+                    key = n.IATA_CODE,
+                    on_click = self._choiceDDaPartenza
+                )
+            )
+
+        def _choiceDDaPartenza(self, e):
+            self._choicePartenza = e.control.data
+            print(f"Hai selezionato come aeroporto di partenza {self._choicePartenza}")
     - Aggiungere List View: self._txtResults = ft.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
     - Aggiungere tutto alla pagina: self._page.add(row1, row2, row3, self._txtResults)
     - Aggiornare pagina: self._page.update()
 
 2) Cominciare a creare il grafo:
     Nel DAO:
-    - getAllNodes: prendo tutti i nodi, devo fare una query specifica in base al database
+    - getAllNodes: prendo tutti i nodi, devo fare una query specifica in base al database --> potrebbe non essere immediata
     NB tutti i metodi del DAO sono di tipo:
     @staticmethod
-    def getAllNodes():
+    def getAllNodes(n):
         conn = DBConnect.get_connection()
 
         result = []
@@ -37,16 +51,102 @@
                     or a.ID = f.DESTINATION_AIRPORT_ID
                     group BY a.ID , a.IATA_CODE , f.AIRLINE_ID) t
                     GROUP BY t.ID, t.IATA_CODE
-                    HAVING N>=5
+                    HAVING N>= %s # quando è parametrica
                     order by N ASC """
 
-        cursor.execute(query)
+        cursor.execute(query, (n,) # se è parametrica devo passarle qualcosa
 
         for row in cursor:
-            result.append(Airport(**row))
+            result.append(idMapAirports[row["ID"]]) # Recupero oggetto dalla sua chiave primaria
 
         cursor.close()
         conn.close()
         return result
+        - getAllEdges: prendo tutti gli archi in base alla richiesta e scrivo una query.
+        NB: potrei avere una query complicata e decidere di scriverla più semplice e poi aggiungere criteri in PY in un metodo del model
+        o scrivere direttamente una query SQl completa ma più complicata
 
 3) Model: bisogna creare il grafo
+    - Creo una mappa prima di chiamare il metodo dei nodi quando mi serve, da uno specifico dato (es l'ID), ottenere tutto l'oggetto (es. Aeroporto)
+    es:     self._idMapAirports = {}
+            for a in self._airports:
+                self._idMapAirports[a.ID] = a
+    - Inizio a creare il mio grafo
+    self._graph = nx.Graph() #potrei dover creare un DiGraph, MultiGraph ecc
+
+    def buildGraph(self, nMin):
+        # Recupera nodi
+        nodes = DAO.getAllNodes(nMin, self._idMapAirports)
+        self._graph.add_nodes_from(nodes)
+        self.addEdges()
+
+    def addEdges(self):
+    # Ho dovuto aggiungere dei criteri nel metodo poichè filtrava male
+    # Queste tratte hanno 2 problemi:
+    # 1) ho archi diretti e inversi e quindi dovrò fare la somma a mano
+    # 2) ho archi fra aeroporti che avevo filtrato
+    allTratte = DAO.getAllEdgesV1(self._idMapAirports)
+
+    for t in allTratte:
+        if t.aeroportoP in self._graph and t.aeroportoA in self._graph:
+            # allora posso aggiungerlo
+            if self._graph.has_edge(t.aeroportoP, t.aeroportoA):
+                self._graph[t.aeroportoP][t.aeroportoA]['weight'] += t.peso
+            else:
+                self._graph.add_edge(t.aeroportoP, t.aeroportoA, weight=t.peso)
+
+    def getGraphDetails(self):
+        # Fa una return di numero nodi e num archi contati
+        return len(self._graph.nodes), len(self._graph.edges)
+
+    # Metodo usato per trovare i vicini, si usa spesso !!
+    def getViciniOrdinati(self, source):
+    # Restituisce tutti i vicini di source ordinati per peso dell'arco che collega source al vicino
+    vicini = self._graph.neighbors(source)
+    viciniT = []
+    for v in vicini:
+        viciniT.append( (v, self._graph[source][v]['weight']) )
+    viciniT.sort(key=lambda x: x[1]) # vedo il valore in posizione 1 (peso) e lo ordino
+    return viciniT
+
+4) Controller: posso gestire il metodo handleAnalizza associato al pulsante
+    - Converto in value il valore inserito dall'utente
+    - Gestisco tutte le casistiche di valore inserito non valido ("", non intero, non positivo ecc)
+    es: def handleAnalizza(self, e):
+        cMinTxt = self._view._txtInCMin.value
+        if cMinTxt == "":
+            self._view._txtResults.controls.clear()
+            self._view._txtResults.controls.append(
+                ft.Text("Inserire un valore numerico per numero minimo compagnie", color="red"))
+            self._view.update_page() # SEMPRE AGGIORNARE LA PAGINA
+            return
+
+        try:
+            cMin = int(cMinTxt)
+        except ValueError:
+            self._view._txtResults.controls.clear()
+            self._view._txtResults.controls.append(
+                ft.Text("Inserire un valore intero per numero minimo compagnie", color="red")
+            )
+            self._view.update_page()
+            return
+
+        if cMin <=0:
+            self._view._txtResults.controls.clear()
+            self._view._txtResults.controls.append(
+                ft.Text("Il filtro sul numero di compagnie deve essere un intero positivo", color="red")
+            )
+            self._view.update_page()
+            return
+
+        # Arrivati qui è tutto ok, stampo il grafo
+        self._model.buildGraph(cMin)
+        nNodes, nEdges = self._model.getGraphDetails()
+        self._view._txtResults.controls.clear()
+        self._view._txtResults.controls.append(
+            ft.Text("Grafo correttamente creato:", color="green")
+        )
+        self._view._txtResults.controls.append(
+            ft.Text(f"Il grafo contiene {nNodes} nodi e {nEdges} archi", color="green")
+        )
+        self._view.update_page()

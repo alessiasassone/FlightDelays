@@ -1,6 +1,11 @@
+Punto 1
+0) Leggere il testo e capire che tipo di grafo vuole il testo, quali sono i nodi e quali gli archi
+    + è pesato? In caso capire come calcolare il peso: es. Il peso dell’arco deve rappresentare il numero totale di voli tra i due aeroporti
+
 1) Fai partire il programma e controlla la view. Eventualmente, vai su view.py e inserisci oggetti richiesti.
-    - Sistemare titolo (self._page.title)
-    - Aggiungere campi di testo come txtField
+    - Sistemare titolo:
+      es: self._page.title = "Titolo"
+    - Aggiungere campi di testo come txtField per input utente (es. numeri, filtri, soglie)
       es: self._txtInCMin = ft.TextField(label="N min compagnie")
     - Aggiungere bottoni come Elevatedbutton, in on_click inserire una funzione del tipo .handleQualcosa
       e NB handleQualcosa sarà funzione nel controller.
@@ -14,7 +19,7 @@
             ft.Container(self._btnAnalizzaAeroporti, width=250),
         ], alignment=ft.MainAxisAlignment.CENTER)
     - Aggiungere DropDown: self._ddAeroportoA = ft.Dropdown(label="Aeroporto di Destinazione")
-    NB va fatto nel controller
+    NB: va fatto nel controller
         def _fillDropdown(self, allNodes):
         for n in allNodes:
             self._view._ddAeroportoP.options.append(
@@ -25,16 +30,19 @@
                 )
             )
 
-        def _choiceDDaPartenza(self, e):
+        def _choiceDDaPartenza(self, e): # Salvare la scelta del dropdown
             self._choicePartenza = e.control.data
             print(f"Hai selezionato come aeroporto di partenza {self._choicePartenza}")
-    - Aggiungere List View: self._txtResults = ft.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
-    - Aggiungere tutto alla pagina: self._page.add(row1, row2, row3, self._txtResults)
-    - Aggiornare pagina: self._page.update()
+    - Aggiungere List View per stampare risultati:
+      es: self._txtResults = ft.ListView(expand=1, spacing=10, padding=20, auto_scroll=True)
+    - Aggiungere tutto alla pagina:
+      es: self._page.add(row1, row2, row3, self._txtResults)
+    - Aggiornare pagina, IMPORTANTISSIMO: self._page.update()
 
-2) Cominciare a creare il grafo:
+2) Cominciare a creare il grafo recuperando i dati dal database:
     Nel DAO:
-    - getAllNodes: prendo tutti i nodi, devo fare una query specifica in base al database --> potrebbe non essere immediata
+    - getAllNodes: prendo tutti i nodi, devo fare una query specifica in base al testo
+        --> potrebbe non essere immediata
     NB tutti i metodi del DAO sono di tipo:
     @staticmethod
     def getAllNodes(n):
@@ -55,9 +63,12 @@
                     order by N ASC """
 
         cursor.execute(query, (n,) # se è parametrica devo passarle qualcosa
+        # Se devo prendere tutto senza criteri (Select *) basta scrivere cursor.execute(query)
+        # Se ho query parametriche con %s serve sicuramente un parametro, come nell'esempio
+        # NB se ci sono più parametri, controllare l'ordine
 
         for row in cursor:
-            result.append(idMapAirports[row["ID"]]) # Recupero oggetto dalla sua chiave primaria
+            result.append(idMapAirports[row["ID"]]) # Recupero oggetto dalla sua chiave primaria (row["ID"] è un intero preso dal DB)
 
         cursor.close()
         conn.close()
@@ -66,13 +77,41 @@
         NB: potrei avere una query complicata e decidere di scriverla più semplice e poi aggiungere criteri in PY in un metodo del model
         o scrivere direttamente una query SQl completa ma più complicata
 
-3) Model: bisogna creare il grafo
+3) Classi Entity: es qua Airport
+    Servono quando una tabella rappresenta un oggetto reale e mi serve avere un oggetto.
+    Sono tutti di tipo dataclass e devono avere come attributi gli stessi nomi e gli stessi tipi che leggiamo sul DB !!
+    @dataclass
+    class Airport:
+        ID: int
+        IATA_CODE: str
+        AIRPORT: str
+        CITY: str
+        STATE: str
+        COUNTRY: str
+        LATITUDE: float
+        LONGITUDE: float
+        TIMEZONE_OFFSET: float
+
+    Questi 3 metodi sono standard:
+        Per descrizione esplicativa:
+        def __str__(self):
+            return f"{self.AIRPORT}"
+
+        Per rendere hashable (usa chiave primaria)
+        def __hash__(self):
+            return hash(self.ID)
+
+        Per unicità:
+        def __eq__(self, other):
+            return self.ID == other.ID
+
+4) Model: bisogna creare il grafo
+    - Inizio a creare il mio grafo
+        self._graph = nx.Graph() #potrei dover creare un DiGraph, MultiGraph ecc
     - Creo una mappa prima di chiamare il metodo dei nodi quando mi serve, da uno specifico dato (es l'ID), ottenere tutto l'oggetto (es. Aeroporto)
     es:     self._idMapAirports = {}
             for a in self._airports:
                 self._idMapAirports[a.ID] = a
-    - Inizio a creare il mio grafo
-    self._graph = nx.Graph() #potrei dover creare un DiGraph, MultiGraph ecc
 
     def buildGraph(self, nMin):
         # Recupera nodi
@@ -101,52 +140,90 @@
 
     # Metodo usato per trovare i vicini, si usa spesso !!
     def getViciniOrdinati(self, source):
-    # Restituisce tutti i vicini di source ordinati per peso dell'arco che collega source al vicino
-    vicini = self._graph.neighbors(source)
-    viciniT = []
-    for v in vicini:
-        viciniT.append( (v, self._graph[source][v]['weight']) )
-    viciniT.sort(key=lambda x: x[1]) # vedo il valore in posizione 1 (peso) e lo ordino
-    return viciniT
+        # Restituisce tutti i vicini di source ordinati per peso dell'arco che collega source al vicino
+        vicini = self._graph.neighbors(source)
+        viciniT = []
+        for v in vicini:
+            viciniT.append( (v, self._graph[source][v]['weight']) )
+        viciniT.sort(key=lambda x: x[1]) # vedo il valore in posizione 1 (peso) e lo ordino
+        return viciniT
 
-4) Controller: posso gestire il metodo handleAnalizza associato al pulsante
+5) Controller: posso gestire il metodo handleAnalizza associato al pulsante = controllo ciò che inserisce l'utente
     - Converto in value il valore inserito dall'utente
     - Gestisco tutte le casistiche di valore inserito non valido ("", non intero, non positivo ecc)
     es: def handleAnalizza(self, e):
-        cMinTxt = self._view._txtInCMin.value
-        if cMinTxt == "":
-            self._view._txtResults.controls.clear()
-            self._view._txtResults.controls.append(
-                ft.Text("Inserire un valore numerico per numero minimo compagnie", color="red"))
-            self._view.update_page() # SEMPRE AGGIORNARE LA PAGINA
-            return
+            cMinTxt = self._view._txtInCMin.value
+            if cMinTxt == "":
+                self._view._txtResults.controls.clear()
+                self._view._txtResults.controls.append(
+                    ft.Text("Inserire un valore numerico per numero minimo compagnie", color="red"))
+                self._view.update_page() # SEMPRE AGGIORNARE LA PAGINA
+                return # NB il return !!!
 
-        try:
-            cMin = int(cMinTxt)
-        except ValueError:
+            try:
+                cMin = int(cMinTxt)
+            except ValueError:
+                self._view._txtResults.controls.clear()
+                self._view._txtResults.controls.append(
+                    ft.Text("Inserire un valore intero per numero minimo compagnie", color="red")
+                )
+                self._view.update_page()
+                return
+
+            if cMin <=0:
+                self._view._txtResults.controls.clear()
+                self._view._txtResults.controls.append(
+                    ft.Text("Il filtro sul numero di compagnie deve essere un intero positivo", color="red")
+                )
+                self._view.update_page()
+                return
+
+            # Arrivati qui è tutto ok, stampo il grafo
+            self._model.buildGraph(cMin)
+            nNodes, nEdges = self._model.getGraphDetails()
             self._view._txtResults.controls.clear()
             self._view._txtResults.controls.append(
-                ft.Text("Inserire un valore intero per numero minimo compagnie", color="red")
+                ft.Text("Grafo correttamente creato:", color="green")
+            )
+            self._view._txtResults.controls.append(
+                ft.Text(f"Il grafo contiene {nNodes} nodi e {nEdges} archi", color="green")
             )
             self._view.update_page()
-            return
 
-        if cMin <=0:
-            self._view._txtResults.controls.clear()
-            self._view._txtResults.controls.append(
-                ft.Text("Il filtro sul numero di compagnie deve essere un intero positivo", color="red")
-            )
-            self._view.update_page()
-            return
+Punto 2
+Massimizzare, migliorare, ottimo, sequenza -> BACKTRACKING / RICORSIONE
+Caso 1) Cammino minimo, shortest path, distanza minima
+        nx.shortest_path() , nx.dijkstra_path() , nx.has_path()
+Caso 2) - Ricorsione: percorso migliore, no ripetizioni
+        def _ricorsione(self, parziale, v1, t):
+            # Verifico se parziale è una soluzione valida ed in caso la salvo
+            if parziale[-1] == v1: # potenzialmente questa è una sol accettabile
+                if self._getScore(parziale) > self._bestScore:
+                    self._bestCammino = copy.deepcopy(parziale) #NB deepcopy !!!
+                    self._bestScore = self._getScore(parziale)
+            # Verifico se ha senso continuare ad aggiungere elementi in parziale: terminazione
+            if len(parziale) == t+1: #Allora parziale ha già raggiunto il numero massimo di tratte
+                return
+            # espando parziale e faccio ricorsione con backtracking
+            for n in self._graph.neighbors(parziale[-1]):
+                if n not in parziale: # Non posso ripassare sui nodi
+                    parziale.append(n)
+                    self._ricorsione(parziale, v1, t)
+                    parziale.pop()
 
-        # Arrivati qui è tutto ok, stampo il grafo
-        self._model.buildGraph(cMin)
-        nNodes, nEdges = self._model.getGraphDetails()
-        self._view._txtResults.controls.clear()
-        self._view._txtResults.controls.append(
-            ft.Text("Grafo correttamente creato:", color="green")
-        )
-        self._view._txtResults.controls.append(
-            ft.Text(f"Il grafo contiene {nNodes} nodi e {nEdges} archi", color="green")
-        )
-        self._view.update_page()
+        - Backtracking:
+        def getCamminoOttimo(self, v0, v1, t):
+            self._bestCammino = []
+            self._bestScore = 0
+
+            parziale = [v0]
+
+            self._ricorsione(parziale, v1, t)
+            return self._bestCammino, self._bestScore
+
+        - Score
+        def _getScore(self, parziale):
+            sumPesi = 0
+            for i in range (0,len(parziale)-1):
+                sumPesi += self._graph[parziale[i]][parziale[i+1]]['weight']
+            return sumPesi
